@@ -85,7 +85,9 @@ Windows: copy .streamlit\secrets.toml.example .streamlit\secrets.toml<br>
 ```bash    
 macOS/Linux: cp .streamlit/secrets.toml.example .streamlit/secrets.toml<br>
 ```
-   3. Open .streamlit/secrets.toml and paste your API key inside the quotes:<br>
+<br>
+
+  3. Open .streamlit/secrets.toml and paste your API key inside the quotes:<br>
 ```bash
 GEMINI_API_KEY = "your_actual_api_key_here"
 ```
