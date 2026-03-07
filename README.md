@@ -2,6 +2,7 @@
 
 This project is a specialized Streamlit-based AI Chatbot designed for the fitness and health industry. It functions as a virtual gym instructor that provides personalized workout guidance,       tracks exercise performance, and offers data-driven progress insights through a conversational interface.
 
+
 # Key Features
   📍  Personalized Routine Generation: Recommends workouts tailored to specific user goals such as strength, weight loss, endurance, or flexibility. <br>
   📍  Conversational Logging: Allows users to log completed workouts and sets using simple natural language messages.<br>
@@ -10,10 +11,12 @@ This project is a specialized Streamlit-based AI Chatbot designed for the fitnes
   📍  Instructional Guidance: Provides step-by-step exercise instructions, including tips for form, intensity, and variations.<br>
   📍  Weekly Performance Summaries: Generates a summary every Sunday detailing workouts completed and progress toward long-term goals.<br>
 
+
 # User Experience & Interface
-  The application is designed with an intuitive dual-component layout:
+  The application is designed with an intuitive dual-component layout:<br>
   📲  Fitness Profile Sidebar: A dedicated space for users to input their fitness level (Beginner, Intermediate, Advanced), workout frequency, and any physical limitations or injuries.<br>
   📲  AI Chat Window: An interactive space where the bot provides motivational greetings, answers fitness/nutrition questions, and logs daily activity.<br>
+
 
 # Safety & Scope
   To ensure user safety, the chatbot operates under the following strictly defined guardrails:<br>
@@ -22,6 +25,7 @@ This project is a specialized Streamlit-based AI Chatbot designed for the fitnes
   ✔️  Targeted Assistance: Designed specifically for gym members, fitness beginners, and intermediate users.<br>
   ✔️  Realistic Expectations: The bot does not make exaggerated claims or guarantee specific physical results.<br>
 
+
 # System Tone & Output
   The chatbot maintains a friendly, concise, and motivating tone. Every interaction is designed to include:<br>
   📜  A motivational greeting.<br>
@@ -29,7 +33,9 @@ This project is a specialized Streamlit-based AI Chatbot designed for the fitnes
   📜  A relevant progress summary when data is updated.<br>
 
 
-# This guide will help you get the Streamlit AI Fitness Chatbot up and running on your local machine. This application serves as a conversational gym instructor that provides personalized workout guidance, tracks exercise performance, and offers data-driven progress insights.
+
+
+This guide will help you get the Streamlit AI Fitness Chatbot up and running on your local machine. This application serves as a conversational gym instructor that provides personalized workout guidance, tracks exercise performance, and offers data-driven progress insights.
 
   ➡️ 1. Clone the Repository<br>
       Open your terminal or command prompt and run the following commands to clone the project and enter the directory:
@@ -56,5 +62,12 @@ source venv/bin/activate
 ```bash
 python -m pip install -r requirements.txt
 ```
+
+# Technologies Used
+
+Python
+Streamlit
+Google Generative AI (Gemini API)
+Natural Language Processing
       
 
