@@ -74,7 +74,7 @@ python -m pip install -r requirements.txt
   The chatbot requires a Google Gemini API key to function. This app does not accept API keys via the UI for security reasons. Use one of the following methods to configure your key:<br>
   <br>
 
-  ##Option 1: Streamlit Secrets (Recommended)<br>
+  ## Option 1: Streamlit Secrets (Recommended)<br>
   <br>
     1. Locate the .streamlit folder in your project root.<br>
     <br>
