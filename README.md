@@ -38,6 +38,7 @@ This project is a specialized Streamlit-based AI Chatbot designed for the fitnes
 
 This guide will help you get the Streamlit AI Fitness Chatbot up and running on your local machine. This application serves as a conversational gym instructor that provides personalized workout guidance, tracks exercise performance, and offers data-driven progress insights.
 <br>
+<br>
 
   ➡️ 1. Clone the Repository<br>
       Open your terminal or command prompt and run the following commands to clone the project and enter the directory:
