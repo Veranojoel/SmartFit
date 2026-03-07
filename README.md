@@ -36,7 +36,7 @@ This project is a specialized Streamlit-based AI Chatbot designed for the fitnes
 <br>
 
 
-This guide will help you get the Streamlit AI Fitness Chatbot up and running on your local machine. This application serves as a conversational gym instructor that provides personalized workout guidance, tracks exercise performance, and offers data-driven progress insights.
+❗️This guide will help you get the Streamlit AI Fitness Chatbot up and running on your local machine. This application serves as a conversational gym instructor that provides personalized           workout guidance, tracks exercise performance, and offers data-driven progress insights.❗️
 <br>
 <br>
 
@@ -72,9 +72,9 @@ python -m pip install -r requirements.txt
 
 # Technologies Used
 
-Python
-Streamlit
-Google Generative AI (Gemini API)
-Natural Language Processing
+Python<br>
+Streamlit<br>
+Google Generative AI (Gemini API)<br>
+Natural Language Processing<br>
       
 
