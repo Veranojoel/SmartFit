@@ -1,4 +1,4 @@
-# Streamlit AI Fitness Chatbot & Progress Tracker
+# Streamlit AI Fitness Chatbot & Progress Tracker "SmartFit"
 
 This project is a specialized Streamlit-based AI Chatbot designed for the fitness and health industry. It functions as a virtual gym instructor that provides personalized workout guidance,       tracks exercise performance, and offers data-driven progress insights through a conversational interface.
 
