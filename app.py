@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import html
 import hashlib
 import os
 import re
@@ -302,6 +303,7 @@ def _init_state() -> None:
     st.session_state.setdefault("messages", [])  # list[dict] with {role, content}
     st.session_state.setdefault("last_weekly_summary_week", None)
     st.session_state.setdefault("page", "setup")
+    st.session_state.setdefault("pending_user_text", None)
 
 
 def _get_gemini_api_key() -> Optional[str]:
@@ -352,12 +354,14 @@ def _default_workout_days(days_per_week: int) -> List[int]:
     return patterns.get(days_per_week, [0, 2, 4])
 
 
-def _render_quick_setup_sidebar() -> None:
+@st.dialog("Quick Setup")
+def _dialog_quick_setup() -> None:
+    """Modal dialog for fitness profile setup."""
     existing: Optional[Dict[str, Any]] = st.session_state.profile
     is_edit = existing is not None
 
-    with st.expander("Quick setup" if not is_edit else "Quick setup (edit)", expanded=not is_edit):
-        with st.form("quick_setup_sidebar"):
+    st.caption("Fill this once to personalize the chatbot." if not is_edit else "Edit your fitness profile.")
+    with st.form("quick_setup_dialog"):
             goal_options = ["Strength", "Weight loss", "Endurance", "Flexibility", "General health"]
             level_options = ["Beginner", "Intermediate", "Advanced"]
 
@@ -415,22 +419,27 @@ def _render_quick_setup_sidebar() -> None:
 
             submitted = st.form_submit_button("Save" if not is_edit else "Save changes")
 
-        if submitted:
-            workout_weekdays = sorted(planned_days) if planned_days else _default_workout_days(int(days_per_week))
-            st.session_state.profile = {
-                "goal": goal,
-                "level": level,
-                "days_per_week": int(days_per_week),
-                "session_minutes": int(session_minutes),
-                "limitations": str(limitations or "").strip(),
-                "workout_weekdays": workout_weekdays,
-                "start_date": start_date,
-                "target_weeks": int(target_weeks),
-                "target_total_workouts": int(target_weeks) * max(1, len(workout_weekdays)),
-                "weight_kg": float(weight_kg) if float(weight_kg) > 0 else None,
-            }
-            st.session_state.page = "chat"
-            st.rerun()
+    if submitted:
+        workout_weekdays = sorted(planned_days) if planned_days else _default_workout_days(int(days_per_week))
+        st.session_state.profile = {
+            "goal": goal,
+            "level": level,
+            "days_per_week": int(days_per_week),
+            "session_minutes": int(session_minutes),
+            "limitations": str(limitations or "").strip(),
+            "workout_weekdays": workout_weekdays,
+            "start_date": start_date,
+            "target_weeks": int(target_weeks),
+            "target_total_workouts": int(target_weeks) * max(1, len(workout_weekdays)),
+            "weight_kg": float(weight_kg) if float(weight_kg) > 0 else None,
+        }
+        st.session_state.page = "chat"
+        st.rerun()
+
+
+def _render_quick_setup_sidebar() -> None:
+    if st.button("Edit Setup", use_container_width=True, key="open_setup_dialog"):
+        _dialog_quick_setup()
 
 
 def _render_quick_setup_main() -> None:
@@ -551,11 +560,14 @@ def _progress_block(profile: Dict[str, Any]) -> None:
         today=today,
     )
 
+    est_done_compact = est_done.strftime("%b %d") if est_done else "—"
+    est_done_full = est_done.isoformat() if est_done else "No estimate yet"
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Workouts", f"{t['total_workouts']}")
     c2.metric("Hours", f"{t['total_hours']:.1f}")
     c3.metric("Goal", f"{percent * 100:.0f}%")
-    c4.metric("Est. completion", est_done.isoformat() if est_done else "—")
+    c4.metric("Est. completion", est_done_compact, help=f"Full date: {est_done_full}")
 
 
 def _show_weekly_summary_if_sunday(profile: Dict[str, Any]) -> None:
@@ -634,8 +646,25 @@ def _user_msg(content: str) -> None:
 
 def _render_chat() -> None:
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+        role = str(msg.get("role") or "assistant")
+        content = str(msg.get("content") or "")
+
+        if role == "user":
+            content_html = html.escape(content).replace("\n", "<br>")
+            st.markdown(
+                (
+                    "<div style='width:100%; border:1px solid rgba(255,255,255,0.10); "
+                        "border-radius:12px; padding:10px 12px; background:rgba(255,255,255,0.01); "
+                    "box-sizing:border-box; text-align:right;'>"
+                    f"{content_html}"
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(content)
+
+        st.markdown("<div style='height: 0.4rem;'></div>", unsafe_allow_html=True)
 
 
 def _build_chat_context(
@@ -686,90 +715,56 @@ def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="centered")
     _init_state()
 
+    # Sidebar action buttons: left-aligned, borderless by default, visible on hover.
+    st.markdown(
+        """
+        <style>
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+            justify-content: flex-start !important;
+            text-align: left !important;
+            border: 1px solid transparent;
+            background: transparent;
+            box-shadow: none;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button > div,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button span {
+            justify-content: flex-start !important;
+            text-align: left !important;
+            width: 100% !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+            border-color: rgba(250, 250, 250, 0.22);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.title(APP_TITLE)
     st.caption(SAFETY_NOTE)
 
-    # Sidebar: API key + basic controls
+    # Sidebar: safety note and quick actions
     with st.sidebar:
-        st.subheader("Settings")
-        if st.button("Clear session", type="secondary"):
-            for k in ["profile", "workout_logs", "prs", "messages", "last_weekly_summary_week"]:
-                st.session_state[k] = None if k == "profile" else [] if k in {"workout_logs", "prs", "messages"} else None
-            st.session_state.page = "setup"
-            st.rerun()
-
-        st.divider()
         st.caption("What it will NOT do: medical advice, risky exercise prescriptions, sharing personal data without consent, or guaranteed results.")
+        st.divider()
 
         # Only show editable setup in the sidebar after initial setup is complete.
         if st.session_state.profile and st.session_state.page == "chat":
-            st.divider()
             _render_quick_setup_sidebar()
-
-        st.divider()
-        with st.expander("Structured workout log"):
-            if st.session_state.profile:
-                profile = st.session_state.profile
-                _apply_structured_log_autofill(profile=profile)
-                with st.form("structured_log_sidebar"):
-                    w_type = st.selectbox(
-                        "Workout type",
-                        ["strength", "cardio", "hiit", "yoga", "flexibility", "workout"],
-                        key="structured_w_type",
-                    )
-                    duration = st.number_input(
-                        "Duration (minutes)",
-                        min_value=5,
-                        max_value=240,
-                        value=int(st.session_state.get("structured_duration") or int(profile.get("session_minutes") or 60)),
-                        step=5,
-                        key="structured_duration",
-                    )
-                    sets = st.number_input(
-                        "Sets (optional)",
-                        min_value=0,
-                        max_value=200,
-                        value=int(st.session_state.get("structured_sets") or 0),
-                        step=1,
-                        key="structured_sets",
-                    )
-                    notes = st.text_area(
-                        "Notes (optional)",
-                        value=str(st.session_state.get("structured_notes") or ""),
-                        key="structured_notes",
-                    )
-                    entry_date = st.date_input(
-                        "Date",
-                        value=st.session_state.get("structured_date") or date.today(),
-                        key="structured_date",
-                    )
-                    ok = st.form_submit_button("Add log")
-
-                if ok:
-                    from src.fitness_tracker import WorkoutLogEntry, estimate_calories_kcal
-
-                    calories = estimate_calories_kcal(
-                        duration_min=int(duration),
-                        workout_type=str(w_type),
-                        weight_kg=profile.get("weight_kg"),
-                    )
-                    entry = WorkoutLogEntry(
-                        entry_date=entry_date,
-                        workout_type=str(w_type),
-                        duration_min=int(duration),
-                        sets=int(sets) if int(sets) > 0 else None,
-                        notes=notes.strip(),
-                        calories_kcal=calories,
-                    )
-                    st.session_state.workout_logs.append(entry.to_dict())
-                    st.success("Logged!")
-                    st.rerun()
-            else:
-                st.caption("Complete setup first to enable logging.")
+            if st.button("Log Workout", use_container_width=True, key="open_log_workout"):
+                _dialog_structured_log()
+        else:
+            st.caption("Complete setup first to enable logging.")
 
     # Phase 1: Setup (main page)
     if st.session_state.page == "setup" or not st.session_state.profile:
-        _render_quick_setup_main()
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("🚀 Get Started", use_container_width=True, key="initial_setup_btn"):
+                _dialog_quick_setup()
         return
 
     profile: Dict[str, Any] = st.session_state.profile
@@ -788,10 +783,16 @@ def main() -> None:
     st.subheader("Chat")
     _render_chat()
 
-    user_text = st.chat_input("Log a workout with +... or ask a question")
+    user_text = st.chat_input("Build me a workout plan…")
     if user_text:
-        today = date.today()
         _user_msg(user_text)
+        st.session_state.pending_user_text = user_text
+        st.rerun()
+
+    pending_user_text = st.session_state.get("pending_user_text")
+    if pending_user_text:
+        user_text = str(pending_user_text)
+        today = date.today()
 
         logs = coerce_logs(st.session_state.workout_logs)
 
@@ -832,6 +833,7 @@ def main() -> None:
         # 3) Otherwise: Gemini Q&A
         key = _get_gemini_api_key()
         if not key:
+            st.session_state.pending_user_text = None
             _assistant_reply(_gemini_setup_hint())
             st.rerun()
 
@@ -844,13 +846,88 @@ def main() -> None:
         )
 
         try:
-            answer = _gemini_generate(key, context)
+            with st.spinner("Thinking..."):
+                answer = _gemini_generate(key, context)
         except Exception as e:
+            st.session_state.pending_user_text = None
             _assistant_reply(f"Error: {e}")
             st.rerun()
 
+        st.session_state.pending_user_text = None
         _assistant_reply(answer)
         st.rerun()
+
+
+@st.dialog("Structured Workout Log")
+def _dialog_structured_log() -> None:
+    """Modal dialog for logging structured workouts."""
+    if st.session_state.profile:
+        profile = st.session_state.profile
+        _apply_structured_log_autofill(profile=profile)
+
+        # Initialize defaults only when keys don't exist.
+        if "structured_w_type" not in st.session_state:
+            st.session_state["structured_w_type"] = "workout"
+        if "structured_duration" not in st.session_state:
+            st.session_state["structured_duration"] = int(profile.get("session_minutes") or 60)
+        if "structured_sets" not in st.session_state:
+            st.session_state["structured_sets"] = 0
+        if "structured_notes" not in st.session_state:
+            st.session_state["structured_notes"] = ""
+        if "structured_date" not in st.session_state:
+            st.session_state["structured_date"] = date.today()
+
+        with st.form("structured_log_dialog"):
+            w_type = st.selectbox(
+                "Workout type",
+                ["strength", "cardio", "hiit", "yoga", "flexibility", "workout"],
+                key="structured_w_type",
+            )
+            duration = st.number_input(
+                "Duration (minutes)",
+                min_value=5,
+                max_value=240,
+                step=5,
+                key="structured_duration",
+            )
+            sets = st.number_input(
+                "Sets (optional)",
+                min_value=0,
+                max_value=200,
+                step=1,
+                key="structured_sets",
+            )
+            notes = st.text_area(
+                "Notes (optional)",
+                key="structured_notes",
+            )
+            entry_date = st.date_input(
+                "Date",
+                key="structured_date",
+            )
+            ok = st.form_submit_button("Add log")
+
+        if ok:
+            from src.fitness_tracker import WorkoutLogEntry, estimate_calories_kcal
+
+            calories = estimate_calories_kcal(
+                duration_min=int(duration),
+                workout_type=str(w_type),
+                weight_kg=profile.get("weight_kg"),
+            )
+            entry = WorkoutLogEntry(
+                entry_date=entry_date,
+                workout_type=str(w_type),
+                duration_min=int(duration),
+                sets=int(sets) if int(sets) > 0 else None,
+                notes=notes.strip(),
+                calories_kcal=calories,
+            )
+            st.session_state.workout_logs.append(entry.to_dict())
+            st.success("Logged!")
+            st.rerun()
+    else:
+        st.caption("Complete setup first to enable logging.")
 
 if __name__ == "__main__":
     main()
