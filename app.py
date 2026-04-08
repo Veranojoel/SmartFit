@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 import time
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
@@ -55,8 +56,8 @@ Always respond with:
 - Progress summary if relevant
 
 WEEKLY SCHEDULE TABLE:
-- Include a concise weekly schedule as a Markdown table in your responses.
-- The table should cover Mon–Sun and include at least these columns: Day | Workout | Meals | Time.
+- Only include a weekly schedule as a Markdown table when the user explicitly asks for a plan, schedule, or weekly overview.
+- When included, the table should cover Mon–Sun and include at least these columns: Day | Workout | Meals | Time.
 - Use the user's stated goal, level, frequency, and limitations to keep it realistic and safe.
 - If the user didn't specify times, choose sensible default times and label them as suggestions.
 - On non-workout days, schedule rest/recovery and light activity (walk/mobility) instead of intense training.
@@ -84,6 +85,10 @@ _UNTRUSTED_END = "(end untrusted input)"
 _MAX_USER_TEXT_LENGTH = 2000
 # Maximum characters for the profile limitations field before embedding in the prompt.
 _MAX_LIMITATIONS_LENGTH = 500
+# Maximum characters per history message when embedding prior turns in the prompt.
+_MAX_HISTORY_MSG_LENGTH = 500
+# Number of prior back-and-forth exchanges (each = one user message + one assistant reply) to include in the prompt.
+_MAX_HISTORY_TURNS = 6
 
 # Rate-limiting: at most this many LLM calls within a rolling window, per session.
 _RATE_LIMIT_MAX_CALLS = 10
@@ -95,6 +100,7 @@ _INJECTION_PATTERNS: List[re.Pattern] = [
     for p in [
         r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+instructions?",
         r"disregard\s+(all\s+)?(previous|prior|above|earlier)\s+instructions?",
+        r"(skip|drop|delete|remove)\s+(all\s+)?(previous|prior|above|earlier)\s+instructions?",
         r"\byou\s+are\s+now\b",
         r"\bact\s+as\b",
         r"\bpretend\s+(you\s+are|to\s+be)\b",
@@ -106,10 +112,13 @@ _INJECTION_PATTERNS: List[re.Pattern] = [
         r"reveal\s+(your\s+)?(prompt|instructions?|system)",
         r"override\s+(your\s+)?(guidelines?|rules?|instructions?)",
         r"forget\s+(your\s+)?(previous\s+)?(guidelines?|rules?|instructions?|training)",
+        # Prompt-extraction attempts.
+        r"what\s+(are\s+)?(your\s+)?(instructions?|guidelines?|rules?|system\s+prompt)",
+        r"(show|tell|share|print|output|repeat|echo|dump)\s+(me\s+)?(your\s+)?(instructions?|prompt|system|guidelines?|rules?|training)",
     ]
 ]
 
-# Patterns in LLM output that suggest a successful prompt injection.
+# Patterns in LLM output that suggest a successful prompt injection or prompt leakage.
 _OUTPUT_INJECTION_PATTERNS: List[re.Pattern] = [
     re.compile(p, re.IGNORECASE)
     for p in [
@@ -118,6 +127,10 @@ _OUTPUT_INJECTION_PATTERNS: List[re.Pattern] = [
         r"\bi\s+have\s+(been\s+)?jailbroken\b",
         r"\bignoring\s+previous\s+instructions?\b",
         r"\bas\s+requested\s*,?\s+i\s+(will\s+)?now\s+act\s+as\b",
+        # Prompt-leakage indicators.
+        r"\bmy\s+system\s+prompt\b",
+        r"\bhere\s+(are|is)\s+my\s+(full\s+)?(instructions?|guidelines?|rules?)\b",
+        r"\bmy\s+(full\s+)?(instructions?|prompt|guidelines?)\s+(are|say|state)\b",
     ]
 ]
 
@@ -131,10 +144,31 @@ _OUTPUT_FILTERED_REPLY = (
 )
 
 
+def _normalize_text(text: str) -> str:
+    """Normalize *text* for injection-pattern matching.
+
+    Applies NFKC Unicode normalization to collapse homoglyphs (e.g. fullwidth
+    letters, lookalike Cyrillic/Greek characters) and strips combining diacritical
+    marks so that patterns like "ⅰgnore" or "іgnore" are detected.  Collapses
+    runs of whitespace to a single space.
+    """
+    # NFKC compatibility decomposition converts fullwidth / ligature characters.
+    normalized = unicodedata.normalize("NFKC", text)
+    # Remove combining diacritical marks (U+0300–U+036F and related blocks).
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    # Collapse repeated whitespace and control characters.
+    return re.sub(r"\s+", " ", normalized)
+
+
 def _check_injection(text: str) -> bool:
-    """Return True if *text* contains a known prompt-injection pattern."""
+    """Return True if *text* contains a known prompt-injection pattern.
+
+    The input is Unicode-normalized before matching to catch homoglyph and
+    diacritic-based bypasses.
+    """
+    normalized = _normalize_text(text)
     for pattern in _INJECTION_PATTERNS:
-        if pattern.search(text):
+        if pattern.search(normalized):
             return True
     return False
 
@@ -514,21 +548,28 @@ def _dialog_quick_setup() -> None:
             submitted = st.form_submit_button("Save" if not is_edit else "Save changes")
 
     if submitted:
-        workout_weekdays = sorted(planned_days) if planned_days else _default_workout_days(int(days_per_week))
-        st.session_state.profile = {
-            "goal": goal,
-            "level": level,
-            "days_per_week": int(days_per_week),
-            "session_minutes": int(session_minutes),
-            "limitations": str(limitations or "").strip(),
-            "workout_weekdays": workout_weekdays,
-            "start_date": start_date,
-            "target_weeks": int(target_weeks),
-            "target_total_workouts": int(target_weeks) * max(1, len(workout_weekdays)),
-            "weight_kg": float(weight_kg) if float(weight_kg) > 0 else None,
-        }
-        st.session_state.page = "chat"
-        st.rerun()
+        limitations_clean = str(limitations or "").strip()
+        if _check_injection(limitations_clean):
+            st.error(
+                "The limitations field contains disallowed content. "
+                "Please describe your injuries or limitations in plain language."
+            )
+        else:
+            workout_weekdays = sorted(planned_days) if planned_days else _default_workout_days(int(days_per_week))
+            st.session_state.profile = {
+                "goal": goal,
+                "level": level,
+                "days_per_week": int(days_per_week),
+                "session_minutes": int(session_minutes),
+                "limitations": limitations_clean,
+                "workout_weekdays": workout_weekdays,
+                "start_date": start_date,
+                "target_weeks": int(target_weeks),
+                "target_total_workouts": int(target_weeks) * max(1, len(workout_weekdays)),
+                "weight_kg": float(weight_kg) if float(weight_kg) > 0 else None,
+            }
+            st.session_state.page = "chat"
+            st.rerun()
 
 
 def _render_quick_setup_sidebar() -> None:
@@ -602,21 +643,28 @@ def _render_quick_setup_main() -> None:
         submitted = st.form_submit_button("Save and continue")
 
     if submitted:
-        workout_weekdays = sorted(planned_days) if planned_days else _default_workout_days(int(days_per_week))
-        st.session_state.profile = {
-            "goal": goal,
-            "level": level,
-            "days_per_week": int(days_per_week),
-            "session_minutes": int(session_minutes),
-            "limitations": str(limitations or "").strip(),
-            "workout_weekdays": workout_weekdays,
-            "start_date": start_date,
-            "target_weeks": int(target_weeks),
-            "target_total_workouts": int(target_weeks) * max(1, len(workout_weekdays)),
-            "weight_kg": float(weight_kg) if float(weight_kg) > 0 else None,
-        }
-        st.session_state.page = "chat"
-        st.rerun()
+        limitations_clean = str(limitations or "").strip()
+        if _check_injection(limitations_clean):
+            st.error(
+                "The limitations field contains disallowed content. "
+                "Please describe your injuries or limitations in plain language."
+            )
+        else:
+            workout_weekdays = sorted(planned_days) if planned_days else _default_workout_days(int(days_per_week))
+            st.session_state.profile = {
+                "goal": goal,
+                "level": level,
+                "days_per_week": int(days_per_week),
+                "session_minutes": int(session_minutes),
+                "limitations": limitations_clean,
+                "workout_weekdays": workout_weekdays,
+                "start_date": start_date,
+                "target_weeks": int(target_weeks),
+                "target_total_workouts": int(target_weeks) * max(1, len(workout_weekdays)),
+                "weight_kg": float(weight_kg) if float(weight_kg) > 0 else None,
+            }
+            st.session_state.page = "chat"
+            st.rerun()
 
 
 def _compute_targets(profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -703,9 +751,16 @@ def _gemini_generate(api_key: str, prompt: str) -> str:
         raise RuntimeError("Missing Gemini API key")
 
     from google import genai  # type: ignore
+    from google.genai import types  # type: ignore
 
     client = genai.Client(api_key=api_key)
-    full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}\n\n{_SANDWICH_REMINDER}"
+
+    # Pass SYSTEM_PROMPT via the dedicated system_instruction field so it sits at a
+    # higher trust level than user content.  This prevents it from being overridden
+    # by adversarial instructions placed in the user turn.
+    config = types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
+    # Sandwich reminder is appended after the user content for additional defense-in-depth.
+    contents = f"{prompt}\n\n{_SANDWICH_REMINDER}"
 
     model_candidates = [
         "models/gemini-flash-latest",
@@ -718,7 +773,7 @@ def _gemini_generate(api_key: str, prompt: str) -> str:
     errors: List[str] = []
     for model_name in model_candidates:
         try:
-            resp = client.models.generate_content(model=model_name, contents=full_prompt)
+            resp = client.models.generate_content(model=model_name, contents=contents, config=config)
             text = getattr(resp, "text", None) or ""
             if text.strip():
                 return text.strip()
@@ -768,6 +823,7 @@ def _build_chat_context(
     user_text: str,
     action_notes: List[str],
     projection_note: Optional[str],
+    history: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     t = totals(logs)
     targets = _compute_targets(profile)
@@ -781,6 +837,32 @@ def _build_chat_context(
 
     action_block = "\n".join(f"- {n}" for n in action_notes) if action_notes else "- None"
     projection_block = f"- {projection_note}" if projection_note else "- None"
+
+    # Build conversation history block from recent prior turns.
+    # Each message is capped to _MAX_HISTORY_MSG_LENGTH chars, and user messages are
+    # wrapped in untrusted-input markers so the model can distinguish them from trusted context.
+    history_block = ""
+    if history:
+        # _MAX_HISTORY_TURNS back-and-forth exchanges = _MAX_HISTORY_TURNS * 2 individual messages.
+        recent = history[-(_MAX_HISTORY_TURNS * 2):]
+        lines: List[str] = []
+        for msg in recent:
+            role = str(msg.get("role") or "assistant")
+            raw = str(msg.get("content") or "")
+            truncated = len(raw) > _MAX_HISTORY_MSG_LENGTH
+            content = raw[:_MAX_HISTORY_MSG_LENGTH] + (" [truncated]" if truncated else "")
+            if role == "user":
+                lines.append(
+                    f"USER {_UNTRUSTED_BEGIN}\n{content}\n{_UNTRUSTED_END}"
+                )
+            else:
+                lines.append(f"ASSISTANT: {content}")
+        if lines:
+            history_block = (
+                "CONVERSATION HISTORY (oldest first)\n"
+                + "\n".join(lines)
+                + "\n\n"
+            )
 
     return (
         "USER PROFILE\n"
@@ -805,7 +887,8 @@ def _build_chat_context(
         f"{action_block}\n\n"
         "PROJECTION (if requested)\n"
         f"{projection_block}\n\n"
-        f"USER MESSAGE {_UNTRUSTED_BEGIN}\n"
+        + history_block
+        + f"USER MESSAGE {_UNTRUSTED_BEGIN}\n"
         # Truncated to _MAX_USER_TEXT_LENGTH chars to limit prompt injection payload size.
         f"{user_text[:_MAX_USER_TEXT_LENGTH]}\n"
         f"{_UNTRUSTED_END}\n"
@@ -960,6 +1043,10 @@ def main() -> None:
             user_text=user_text,
             action_notes=action_notes,
             projection_note=projection_note,
+            # `_user_msg(user_text)` appended the current message to `messages` before the
+            # rerun that triggers this code path, so messages[-1] IS the current user turn.
+            # Passing messages[:-1] therefore correctly provides only the prior history.
+            history=st.session_state.messages[:-1] if st.session_state.messages else None,
         )
 
         try:
