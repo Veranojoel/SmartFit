@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 import html
 import hashlib
+import hmac
 from html.parser import HTMLParser
 import os
 import re
@@ -506,8 +507,7 @@ def _require_auth() -> bool:
     pwd_input = st.text_input("Password", type="password", key="_auth_password_input")
     if st.button("Sign in", key="_auth_submit"):
         # Constant-time comparison to mitigate timing attacks.
-        import hmac as _hmac
-        if _hmac.compare_digest(pwd_input, required_pwd):
+        if hmac.compare_digest(pwd_input, required_pwd):
             st.session_state["authenticated"] = True
             st.rerun()
         else:
@@ -892,7 +892,7 @@ def _render_chat() -> None:
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(_strip_html_tags(content))
+            st.markdown(content)
 
         st.markdown("<div style='height: 0.4rem;'></div>", unsafe_allow_html=True)
 
