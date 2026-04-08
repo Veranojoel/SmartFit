@@ -5,6 +5,7 @@ import html
 import hashlib
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
@@ -81,6 +82,87 @@ _UNTRUSTED_BEGIN = "(begin untrusted input)"
 _UNTRUSTED_END = "(end untrusted input)"
 # Maximum characters accepted from free-text user input to limit injection payload size.
 _MAX_USER_TEXT_LENGTH = 2000
+# Maximum characters for the profile limitations field before embedding in the prompt.
+_MAX_LIMITATIONS_LENGTH = 500
+
+# Rate-limiting: at most this many LLM calls within a rolling window, per session.
+_RATE_LIMIT_MAX_CALLS = 10
+_RATE_LIMIT_WINDOW_SECS = 60
+
+# Patterns that indicate a prompt-injection attempt in user-supplied text.
+_INJECTION_PATTERNS: List[re.Pattern] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"ignore\s+(all\s+)?(previous|prior|above|earlier)\s+instructions?",
+        r"disregard\s+(all\s+)?(previous|prior|above|earlier)\s+instructions?",
+        r"\byou\s+are\s+now\b",
+        r"\bact\s+as\b",
+        r"\bpretend\s+(you\s+are|to\s+be)\b",
+        r"\bnew\s+role\b",
+        r"\bdan\b",
+        r"\bjailbreak\b",
+        r"\bsystem\s*:\s*",
+        r"\bassistant\s*:\s*",
+        r"reveal\s+(your\s+)?(prompt|instructions?|system)",
+        r"override\s+(your\s+)?(guidelines?|rules?|instructions?)",
+        r"forget\s+(your\s+)?(previous\s+)?(guidelines?|rules?|instructions?|training)",
+    ]
+]
+
+# Patterns in LLM output that suggest a successful prompt injection.
+_OUTPUT_INJECTION_PATTERNS: List[re.Pattern] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"\bi\s+(am|will)\s+now\s+ignore\b",
+        r"\bmy\s+new\s+(role|instructions?)\b",
+        r"\bi\s+have\s+(been\s+)?jailbroken\b",
+        r"\bignoring\s+previous\s+instructions?\b",
+        r"\bas\s+requested\s*,?\s+i\s+(will\s+)?now\s+act\s+as\b",
+    ]
+]
+
+_INJECTION_BLOCKED_REPLY = (
+    "⚠️ Your message contained patterns that are not allowed. "
+    "Please ask a fitness-related question."
+)
+_OUTPUT_FILTERED_REPLY = (
+    "⚠️ The response was filtered because it appeared to deviate from fitness guidance. "
+    "Please try rephrasing your question."
+)
+
+
+def _check_injection(text: str) -> bool:
+    """Return True if *text* contains a known prompt-injection pattern."""
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(text):
+            return True
+    return False
+
+
+def _filter_output(text: str) -> str:
+    """Return *text* unchanged, or a safe fallback if it shows signs of successful injection."""
+    for pattern in _OUTPUT_INJECTION_PATTERNS:
+        if pattern.search(text):
+            return _OUTPUT_FILTERED_REPLY
+    return text
+
+
+def _check_rate_limit() -> bool:
+    """Return True if this session is within the allowed LLM call rate, False if exceeded.
+
+    Tracks call timestamps in session state and enforces _RATE_LIMIT_MAX_CALLS
+    per _RATE_LIMIT_WINDOW_SECS rolling window.
+    """
+    now = time.time()
+    timestamps: List[float] = st.session_state.get("llm_call_timestamps") or []
+    # Discard timestamps outside the rolling window.
+    timestamps = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW_SECS]
+    if len(timestamps) >= _RATE_LIMIT_MAX_CALLS:
+        st.session_state["llm_call_timestamps"] = timestamps
+        return False
+    timestamps.append(now)
+    st.session_state["llm_call_timestamps"] = timestamps
+    return True
 
 
 def _normalize_day_label(s: str) -> str:
@@ -315,6 +397,7 @@ def _init_state() -> None:
     st.session_state.setdefault("last_weekly_summary_week", None)
     st.session_state.setdefault("page", "setup")
     st.session_state.setdefault("pending_user_text", None)
+    st.session_state.setdefault("llm_call_timestamps", [])  # for rate limiting
 
 
 def _get_gemini_api_key() -> Optional[str]:
@@ -708,7 +791,8 @@ def _build_chat_context(
         f"- Typical session minutes: {profile.get('session_minutes')}\n"
         + (
             f"- Injuries/limitations {_UNTRUSTED_BEGIN}: "
-            f"{profile.get('limitations')} {_UNTRUSTED_END}\n"
+            # Capped at _MAX_LIMITATIONS_LENGTH to limit injection payload size (same policy as chat messages).
+            f"{(profile.get('limitations') or '')[:_MAX_LIMITATIONS_LENGTH]} {_UNTRUSTED_END}\n"
             if profile.get("limitations") else ""
         )
         + "\n"
@@ -854,6 +938,22 @@ def main() -> None:
             _assistant_reply(_gemini_setup_hint())
             st.rerun()
 
+        # Injection detection: block suspicious input before forwarding to the model.
+        if _check_injection(user_text):
+            st.session_state.pending_user_text = None
+            _assistant_reply(_INJECTION_BLOCKED_REPLY)
+            st.rerun()
+
+        # Rate limiting: cap LLM calls to _RATE_LIMIT_MAX_CALLS per _RATE_LIMIT_WINDOW_SECS seconds.
+        if not _check_rate_limit():
+            st.session_state.pending_user_text = None
+            _assistant_reply(
+                f"⚠️ You're sending messages too quickly. "
+                f"Please wait a moment before trying again "
+                f"({_RATE_LIMIT_MAX_CALLS} messages per {_RATE_LIMIT_WINDOW_SECS}s)."
+            )
+            st.rerun()
+
         context = _build_chat_context(
             profile=profile,
             logs=logs,
@@ -865,6 +965,8 @@ def main() -> None:
         try:
             with st.spinner("Thinking..."):
                 answer = _gemini_generate(key, context)
+                # Output filtering: replace the response if it shows injection-success signals.
+                answer = _filter_output(answer)
         except Exception as e:
             st.session_state.pending_user_text = None
             _assistant_reply(f"Error: {e}")
