@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 import html
 import hashlib
+from html.parser import HTMLParser
 import os
 import re
 import time
@@ -173,12 +174,44 @@ def _check_injection(text: str) -> bool:
     return False
 
 
+class _HTMLStripper(HTMLParser):
+    """Minimal HTML parser that extracts plain text, discarding all tags."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: List[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self._parts.append(data)
+
+    def get_text(self) -> str:
+        return "".join(self._parts)
+
+
+def _strip_html_tags(text: str) -> str:
+    """Return *text* with all HTML tags removed, leaving only plain text/Markdown.
+
+    Prevents XSS in LLM responses by ensuring that raw ``<script>``, ``<img>``,
+    ``<a href="javascript:...">``, and similar tags injected by a compromised
+    model output cannot reach the browser DOM via ``st.markdown()``.
+    """
+    stripper = _HTMLStripper()
+    try:
+        stripper.feed(text)
+        return stripper.get_text()
+    except Exception:
+        # If the parser itself errors on malformed input, fall back to a conservative
+        # regex strip so we never pass potentially dangerous raw HTML to the renderer.
+        return re.sub(r"<[^>]*>", "", text)
+
+
 def _filter_output(text: str) -> str:
-    """Return *text* unchanged, or a safe fallback if it shows signs of successful injection."""
+    """Return *text* with HTML stripped; replace with safe fallback on injection signals."""
     for pattern in _OUTPUT_INJECTION_PATTERNS:
         if pattern.search(text):
             return _OUTPUT_FILTERED_REPLY
-    return text
+    # Strip HTML tags to prevent XSS from model-injected markup.
+    return _strip_html_tags(text)
 
 
 def _check_rate_limit() -> bool:
@@ -419,7 +452,10 @@ def _apply_structured_log_autofill(*, profile: Dict[str, Any]) -> None:
         or int(profile.get("session_minutes") or 60)
     )
     st.session_state["structured_sets"] = int(suggestion.get("sets") or 0)
-    st.session_state["structured_notes"] = str(suggestion.get("notes") or "")
+    # Sanitize autofilled notes: if LLM output was hijacked, clear the field
+    # rather than propagating injection content into future prompts.
+    autofill_notes = str(suggestion.get("notes") or "")
+    st.session_state["structured_notes"] = "" if _check_injection(autofill_notes) else autofill_notes
     st.session_state["structured_date"] = suggestion.get("date") or date.today()
 
 
@@ -432,6 +468,51 @@ def _init_state() -> None:
     st.session_state.setdefault("page", "setup")
     st.session_state.setdefault("pending_user_text", None)
     st.session_state.setdefault("llm_call_timestamps", [])  # for rate limiting
+    st.session_state.setdefault("authenticated", False)
+
+
+def _get_app_password() -> Optional[str]:
+    """Return the configured APP_PASSWORD, or None if authentication is disabled."""
+    pwd = None
+    try:
+        pwd = st.secrets.get("APP_PASSWORD")  # type: ignore[assignment]
+    except Exception:
+        pwd = None
+    pwd = (pwd or os.getenv("APP_PASSWORD") or "").strip()
+    return pwd or None
+
+
+def _require_auth() -> bool:
+    """Show a password gate if APP_PASSWORD is configured.
+
+    Returns True when the session is authenticated (or authentication is not
+    configured), False when the gate is displayed and the user has not yet
+    entered the correct password.
+
+    Set ``APP_PASSWORD`` in ``.streamlit/secrets.toml`` or as an environment
+    variable to enable this feature::
+
+        APP_PASSWORD = "your-password-here"
+    """
+    required_pwd = _get_app_password()
+    if not required_pwd:
+        # Authentication not configured — all users are allowed.
+        return True
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.subheader("Sign in")
+    pwd_input = st.text_input("Password", type="password", key="_auth_password_input")
+    if st.button("Sign in", key="_auth_submit"):
+        # Constant-time comparison to mitigate timing attacks.
+        import hmac as _hmac
+        if _hmac.compare_digest(pwd_input, required_pwd):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password. Please try again.")
+    return False
 
 
 def _get_gemini_api_key() -> Optional[str]:
@@ -811,7 +892,7 @@ def _render_chat() -> None:
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(content)
+            st.markdown(_strip_html_tags(content))
 
         st.markdown("<div style='height: 0.4rem;'></div>", unsafe_allow_html=True)
 
@@ -898,6 +979,9 @@ def _build_chat_context(
 def main() -> None:
     st.set_page_config(page_title=APP_TITLE, layout="centered")
     _init_state()
+
+    if not _require_auth():
+        return
 
     # Sidebar action buttons: left-aligned, borderless by default, visible on hover.
     st.markdown(
@@ -1116,6 +1200,14 @@ def _dialog_structured_log() -> None:
         if ok:
             from src.fitness_tracker import WorkoutLogEntry, estimate_calories_kcal
 
+            notes_clean = notes.strip()
+            if _check_injection(notes_clean):
+                st.error(
+                    "The notes field contains disallowed content. "
+                    "Please describe your workout in plain language."
+                )
+                return
+
             calories = estimate_calories_kcal(
                 duration_min=int(duration),
                 workout_type=str(w_type),
@@ -1126,7 +1218,7 @@ def _dialog_structured_log() -> None:
                 workout_type=str(w_type),
                 duration_min=int(duration),
                 sets=int(sets) if int(sets) > 0 else None,
-                notes=notes.strip(),
+                notes=notes_clean,
                 calories_kcal=calories,
             )
             st.session_state.workout_logs.append(entry.to_dict())
