@@ -17,14 +17,10 @@ from src.fitness_tracker import (
     WEEKDAY_LABELS,
     coerce_logs,
     estimate_completion_date_for_target_workouts,
-    parse_quick_log_message,
-    parse_pr_message,
-    projected_total_workouts_by_date,
     totals,
-    try_extract_date_from_question,
     weekly_summary,
 )
-from src.knowledge_base import retrieve_relevant_exercises
+from src.agent import run_agent
 
 
 APP_TITLE = "SmartFit"
@@ -1061,52 +1057,15 @@ def main() -> None:
     pending_user_text = st.session_state.get("pending_user_text")
     if pending_user_text:
         user_text = str(pending_user_text)
-        today = date.today()
 
-        logs = coerce_logs(st.session_state.workout_logs)
-
-        action_notes: List[str] = []
-        projection_note: Optional[str] = None
-
-        # 0) Personal record logging
-        pr = parse_pr_message(user_text, today=today)
-        if pr:
-            st.session_state.prs.append(pr)
-            action_notes.append(f"PR logged: {pr.get('lift')} {pr.get('value')} {pr.get('unit')} ({pr.get('date')})")
-
-        # 1) Quick logging
-        entry = parse_quick_log_message(
-            user_text,
-            today=today,
-            default_duration_min=int(profile.get("session_minutes") or 60),
-            weight_kg=profile.get("weight_kg"),
-        )
-        if entry:
-            st.session_state.workout_logs.append(entry.to_dict())
-            logs = coerce_logs(st.session_state.workout_logs)
-            action_notes.append(
-                f"Workout logged: type={entry.workout_type}, duration_min={entry.duration_min}, sets={entry.sets or 'n/a'}, date={entry.entry_date.isoformat()}"
-            )
-
-        # 2) Projection questions
-        target_date = try_extract_date_from_question(user_text, today=today)
-        if target_date:
-            projected = projected_total_workouts_by_date(
-                logs=logs,
-                start_date=profile["start_date"],
-                workout_weekdays=profile["workout_weekdays"],
-                target_date=target_date,
-            )
-            projection_note = f"By {target_date.isoformat()}, projected total workouts ≈ {projected}."
-
-        # 3) Otherwise: Gemini Q&A
+        # Check API key before doing any further work.
         key = _get_gemini_api_key()
         if not key:
             st.session_state.pending_user_text = None
             _assistant_reply(_gemini_setup_hint())
             st.rerun()
 
-        # Injection detection: block suspicious input before forwarding to the model.
+        # Injection detection: block suspicious input before forwarding to the agent.
         if _check_injection(user_text):
             st.session_state.pending_user_text = None
             _assistant_reply(_INJECTION_BLOCKED_REPLY)
@@ -1122,27 +1081,42 @@ def main() -> None:
             )
             st.rerun()
 
+        logs = coerce_logs(st.session_state.workout_logs)
+
+        # Build structured context for the agent.
+        # action_notes and projection are now handled autonomously by agent tools,
+        # so we pass empty values here — the agent decides what tools to call.
         context = _build_chat_context(
             profile=profile,
             logs=logs,
             user_text=user_text,
-            action_notes=action_notes,
-            projection_note=projection_note,
-            # `_user_msg(user_text)` appended the current message to `messages` before the
-            # rerun that triggers this code path, so messages[-1] IS the current user turn.
-            # Passing messages[:-1] therefore correctly provides only the prior history.
+            action_notes=[],
+            projection_note=None,
+            # messages[-1] is the current user turn (added before this rerun),
+            # so pass messages[:-1] as history to avoid duplicating it.
             history=st.session_state.messages[:-1] if st.session_state.messages else None,
         )
 
-        # Add RAG: retrieve relevant exercises from knowledge base
-        relevant_exercises = retrieve_relevant_exercises(user_text)
-        if relevant_exercises:
-            context += f"\n\nRELEVANT EXERCISES FROM DATABASE:\n{relevant_exercises}"
-
         try:
             with st.spinner("Thinking..."):
-                answer = _gemini_generate(key, context)
-                # Output filtering: replace the response if it shows injection-success signals.
+                # ── Agentic AI loop ───────────────────────────────────────────
+                # The agent autonomously decides which tools to call (RAG search,
+                # workout logging, progress lookup, projections) before producing
+                # a final response.  New logs/PRs created by the agent are
+                # returned separately so we can persist them in session state.
+                answer, _action_notes, new_logs, new_prs = run_agent(
+                    api_key=key,
+                    system_prompt=SYSTEM_PROMPT,
+                    sandwich_reminder=_SANDWICH_REMINDER,
+                    context=context,
+                    workout_logs=st.session_state.workout_logs,
+                    prs=st.session_state.prs,
+                    profile=profile,
+                )
+                # Persist any state changes the agent made via tool calls.
+                st.session_state.workout_logs.extend(new_logs)
+                st.session_state.prs.extend(new_prs)
+                # Output filtering: replace response if it shows injection-success signals.
                 answer = _filter_output(answer)
         except Exception as e:
             st.session_state.pending_user_text = None
