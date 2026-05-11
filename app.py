@@ -20,6 +20,7 @@ from src.fitness_tracker import (
     try_extract_date_from_question,
     weekly_summary,
 )
+from src.knowledge_base import retrieve_relevant_exercises
 
 
 APP_TITLE = "SmartFit"
@@ -844,6 +845,11 @@ def main() -> None:
             action_notes=action_notes,
             projection_note=projection_note,
         )
+
+        # Add RAG: retrieve relevant exercises from knowledge base
+        relevant_exercises = retrieve_relevant_exercises(user_text)
+        if relevant_exercises:
+            context += f"\n\nRELEVANT EXERCISES FROM DATABASE:\n{relevant_exercises}"
 
         try:
             with st.spinner("Thinking..."):
