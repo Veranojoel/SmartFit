@@ -24,6 +24,7 @@ from src.fitness_tracker import (
     try_extract_date_from_question,
     weekly_summary,
 )
+from src.knowledge_base import retrieve_relevant_exercises
 
 
 APP_TITLE = "SmartFit"
@@ -1132,6 +1133,11 @@ def main() -> None:
             # Passing messages[:-1] therefore correctly provides only the prior history.
             history=st.session_state.messages[:-1] if st.session_state.messages else None,
         )
+
+        # Add RAG: retrieve relevant exercises from knowledge base
+        relevant_exercises = retrieve_relevant_exercises(user_text)
+        if relevant_exercises:
+            context += f"\n\nRELEVANT EXERCISES FROM DATABASE:\n{relevant_exercises}"
 
         try:
             with st.spinner("Thinking..."):
