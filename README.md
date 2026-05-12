@@ -110,6 +110,10 @@ streamlit run app.py
 <br>
 
 
+# Deployed App Link
+https://smartfits.streamlit.app/
+
+
 # Technologies Used
 
 Python<br>
