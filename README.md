@@ -112,6 +112,8 @@ streamlit run app.py
 
 # Deployed App Link
 https://smartfits.streamlit.app/
+<br>
+<br>
 
 
 # Technologies Used
