@@ -5,14 +5,18 @@ import html
 import hashlib
 import hmac
 from html.parser import HTMLParser
+import io
+from markdown import markdown as md
+from pathlib import Path
 import os
 import re
 import time
 import unicodedata
 from typing import Any, Dict, List, Optional
-
 import streamlit as st
-
+from PyPDF2 import PdfReader
+from PyPDF2.errors import DependencyError, PdfReadError
+from src.knowledge_base import add_user_documents, clear_user_documents, set_user_docs_enabled, get_last_retrievals
 from src.fitness_tracker import (
     WEEKDAY_LABELS,
     coerce_logs,
@@ -34,6 +38,9 @@ SAFETY_NOTE = (
 
 
 SYSTEM_PROMPT = """You are a friendly, motivating, and knowledgeable gym instructor chatbot. You provide safe, effective exercise guidance, nutrition tips, and progress tracking for users of all fitness levels.
+
+KNOWLEDGE BASE:
+You can search the built-in exercise knowledge base and any user-uploaded PDFs by calling the search tool. If the user asks about their PDFs, use the search tool and cite the retrieved content in your response. Do not claim you cannot access PDFs when they are available.
 
 ON START:
 Ask the user for:
@@ -88,6 +95,9 @@ _MAX_LIMITATIONS_LENGTH = 500
 _MAX_HISTORY_MSG_LENGTH = 500
 # Number of prior back-and-forth exchanges (each = one user message + one assistant reply) to include in the prompt.
 _MAX_HISTORY_TURNS = 6
+# PDF knowledge base limits.
+_MAX_RAG_DOCS = 5
+_MAX_RAG_DOC_CHARS = 4000
 
 # Rate-limiting: at most this many LLM calls within a rolling window, per session.
 _RATE_LIMIT_MAX_CALLS = 10
@@ -141,6 +151,15 @@ _OUTPUT_FILTERED_REPLY = (
     "⚠️ The response was filtered because it appeared to deviate from fitness guidance. "
     "Please try rephrasing your question."
 )
+
+
+def _inject_css() -> None:
+    css_path = Path(__file__).resolve().parent / "assets" / "styles.css"
+    if not css_path.exists():
+        return
+
+    css = css_path.read_text(encoding="utf-8")
+    st.markdown(f"<style>\n{css}\n</style>", unsafe_allow_html=True)
 
 
 def _normalize_text(text: str) -> str:
@@ -467,6 +486,56 @@ def _init_state() -> None:
     st.session_state.setdefault("pending_user_text", None)
     st.session_state.setdefault("llm_call_timestamps", [])  # for rate limiting
     st.session_state.setdefault("authenticated", False)
+    st.session_state.setdefault("rag_docs", [])  # list[dict]
+    st.session_state.setdefault("rag_doc_ids", set())
+    st.session_state.setdefault("rag_enabled", True)
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if getattr(reader, "is_encrypted", False):
+            try:
+                reader.decrypt("")
+            except Exception as e:
+                raise ValueError("Encrypted PDF requires a password.") from e
+        parts: List[str] = []
+        for page in reader.pages:
+            parts.append(page.extract_text() or "")
+        return "\n".join(parts).strip()
+    except DependencyError as e:
+        raise RuntimeError(
+            "This PDF uses AES encryption. Install 'pycryptodome' or use an unencrypted PDF."
+        ) from e
+    except PdfReadError as e:
+        raise RuntimeError("Unable to read PDF. It may be corrupted or unsupported.") from e
+
+
+def _ingest_pdf(file_name: str, data: bytes) -> Optional[Dict[str, Any]]:
+    if not data:
+        return None
+
+    doc_id = hashlib.sha256(data).hexdigest()[:12]
+    if doc_id in st.session_state.get("rag_doc_ids", set()):
+        return None
+
+    if not st.session_state.get("rag_enabled", True):
+        return None
+
+    try:
+        text = _extract_pdf_text(data)
+    except Exception as e:
+        st.error(f"Could not read {file_name}: {e}")
+        return None
+    if not text:
+        return None
+
+    text = text[:_MAX_RAG_DOC_CHARS]
+    chunks = add_user_documents(name=file_name, text=text, doc_id=doc_id)
+    if chunks <= 0:
+        return None
+
+    return {"id": doc_id, "name": file_name, "chunks": chunks}
 
 
 def _get_app_password() -> Optional[str]:
@@ -863,6 +932,18 @@ def _gemini_generate(api_key: str, prompt: str) -> str:
     raise RuntimeError("Gemini SDK error: no model succeeded. " + " | ".join(errors[:3]) + (" | ..." if len(errors) > 3 else ""))
 
 
+def _format_quota_error(err_text: str) -> Optional[str]:
+    if "RESOURCE_EXHAUSTED" not in err_text and "429" not in err_text:
+        return None
+
+    retry_match = re.search(r"retry in\s+([0-9.]+)s", err_text, flags=re.IGNORECASE)
+    retry_after = f" Try again in ~{retry_match.group(1)}s." if retry_match else ""
+    return (
+        "Gemini API quota exceeded." + retry_after
+        + " Please check your plan/billing or reduce request frequency."
+    )
+
+
 def _assistant_reply(content: str) -> None:
     st.session_state.messages.append({"role": "assistant", "content": content})
 
@@ -871,27 +952,54 @@ def _user_msg(content: str) -> None:
     st.session_state.messages.append({"role": "user", "content": content})
 
 
-def _render_chat() -> None:
+def _render_chat() -> str:
+    rows: List[str] = []
     for msg in st.session_state.messages:
         role = str(msg.get("role") or "assistant")
         content = str(msg.get("content") or "")
+        content_html = html.escape(content).replace("\n", "<br>")
 
         if role == "user":
-            content_html = html.escape(content).replace("\n", "<br>")
-            st.markdown(
-                (
-                    "<div style='width:100%; border:1px solid rgba(255,255,255,0.10); "
-                        "border-radius:12px; padding:10px 12px; background:rgba(255,255,255,0.01); "
-                    "box-sizing:border-box; text-align:right;'>"
-                    f"{content_html}"
-                    "</div>"
-                ),
-                unsafe_allow_html=True,
+            rows.append(
+                "<div class='sf-chat-row sf-chat-user'>"
+                "<div class='sf-avatar sf-avatar-user' aria-hidden='true'>🧑</div>"
+                "<div class='sf-chat-bubble sf-chat-bubble-user'>"
+                "<div class='sf-msg-meta'><span class='sf-msg-badge sf-badge-user'>You</span></div>"
+                f"<div class='sf-msg-text'>{content_html}</div>"
+                "</div>"
+                "</div>"
             )
         else:
-            st.markdown(content)
+            assistant_html = md(
+                content,
+                extensions=["tables", "fenced_code"],
+                output_format="html5",
+            )
+            rows.append(
+                "<div class='sf-chat-row sf-chat-assistant'>"
+                "<div class='sf-avatar sf-avatar-bot' aria-hidden='true'>🤖</div>"
+                "<div class='sf-chat-bubble sf-chat-bubble-assistant'>"
+                "<div class='sf-msg-meta'>"
+                "<span class='sf-msg-badge sf-badge-bot'>Coach</span>"
+                "<span class='sf-msg-icon' aria-hidden='true'>💬</span>"
+                "</div>"
+                f"<div class='sf-msg-text'>{assistant_html}</div>"
+                "</div>"
+                "</div>"
+            )
 
-        st.markdown("<div style='height: 0.4rem;'></div>", unsafe_allow_html=True)
+    return "<div class='sf-chat'>" + "".join(rows) + "</div>"
+
+
+def _render_typing_indicator() -> str:
+    return (
+        "<div class='sf-typing'>"
+        "<div class='sf-avatar sf-avatar-bot' aria-hidden='true'>🤖</div>"
+        "<div class='sf-typing-bubble'>Coach is typing"
+        "<span class='sf-dot'></span><span class='sf-dot'></span><span class='sf-dot'></span>"
+        "</div>"
+        "</div>"
+    )
 
 
 def _build_chat_context(
@@ -942,6 +1050,7 @@ def _build_chat_context(
                 + "\n\n"
             )
 
+
     return (
         "USER PROFILE\n"
         f"- Fitness goal: {profile.get('goal')}\n"
@@ -974,42 +1083,24 @@ def _build_chat_context(
 
 
 def main() -> None:
-    st.set_page_config(page_title=APP_TITLE, layout="centered")
+    st.set_page_config(page_title=APP_TITLE, layout="wide")
     _init_state()
+
+    _inject_css()
 
     if not _require_auth():
         return
 
-    # Sidebar action buttons: left-aligned, borderless by default, visible on hover.
     st.markdown(
-        """
-        <style>
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
-            justify-content: flex-start !important;
-            text-align: left !important;
-            border: 1px solid transparent;
-            background: transparent;
-            box-shadow: none;
-            transition: background-color 0.15s ease, border-color 0.15s ease;
-        }
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button > div,
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button span {
-            justify-content: flex-start !important;
-            text-align: left !important;
-            width: 100% !important;
-        }
-        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
-            border-color: rgba(250, 250, 250, 0.22);
-            background: rgba(255, 255, 255, 0.04);
-        }
-        </style>
+        f"""
+        <section class="sf-hero">
+            <div class="sf-hero-eyebrow">AI Coach • SmartFit</div>
+            <div class="sf-hero-title">{APP_TITLE}</div>
+            <div class="sf-hero-sub">{SAFETY_NOTE}</div>
+        </section>
         """,
         unsafe_allow_html=True,
     )
-
-    st.title(APP_TITLE)
-    st.caption(SAFETY_NOTE)
 
     # Sidebar: safety note and quick actions
     with st.sidebar:
@@ -1024,29 +1115,75 @@ def main() -> None:
         else:
             st.caption("Complete setup first to enable logging.")
 
+        if st.session_state.page == "chat" and st.session_state.profile:
+            st.divider()
+            st.subheader("Knowledge base")
+            st.caption("Attach PDF files to let the coach reference them in answers.")
+            rag_enabled = st.toggle("Use PDFs in answers", value=st.session_state.rag_enabled)
+            st.session_state.rag_enabled = rag_enabled
+            set_user_docs_enabled(rag_enabled)
+            if rag_enabled:
+                files = st.file_uploader(
+                    "Upload PDF",
+                    type=["pdf"],
+                    accept_multiple_files=True,
+                    key="rag_pdf_upload",
+                )
+                if files:
+                    for f in files:
+                        doc = _ingest_pdf(f.name, f.getvalue())
+                        if doc:
+                            st.session_state.rag_docs.append(doc)
+                            st.session_state.rag_doc_ids.add(doc["id"])
+                            st.success(f"Added: {doc['name']} ({doc['chunks']} chunks)")
+                        else:
+                            st.info(f"Skipped: {f.name}")
+
+            if st.session_state.rag_docs:
+                st.caption(f"Loaded PDFs: {len(st.session_state.rag_docs)}")
+                if st.button("Clear PDFs", use_container_width=True, key="clear_rag_docs"):
+                    st.session_state.rag_docs = []
+                    st.session_state.rag_doc_ids = set()
+                    clear_user_documents()
+                    st.success("Cleared PDF knowledge base.")
+
     # Phase 1: Setup (main page)
     if st.session_state.page == "setup" or not st.session_state.profile:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
+        st.markdown("<div class='sf-section'></div>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
             if st.button("🚀 Get Started", use_container_width=True, key="initial_setup_btn"):
                 _dialog_quick_setup()
         return
 
     profile: Dict[str, Any] = st.session_state.profile
 
-    _show_weekly_summary_if_sunday(profile)
+    st.markdown("<div class='sf-section'></div>", unsafe_allow_html=True)
     _progress_block(profile)
 
-    st.divider()
-    if st.session_state.prs:
-        with st.expander("Personal records"):
-            # Show most recent first
-            for pr in reversed(st.session_state.prs[-20:]):
-                st.write(f"{pr.get('date')} — {pr.get('lift')}: {pr.get('value')} {pr.get('unit')}")
-
-    st.divider()
     st.subheader("Chat")
-    _render_chat()
+    if st.session_state.messages:
+        st.markdown(_render_chat(), unsafe_allow_html=True)
+
+    if st.session_state.get("pending_user_text"):
+        st.markdown(_render_typing_indicator(), unsafe_allow_html=True)
+
+    st.markdown("<div class='sf-quick-actions'>", unsafe_allow_html=True)
+    with st.container():
+        c1, c2, c3, c4 = st.columns(4)
+        if c1.button("Plan my week", use_container_width=True, key="qa_plan_week"):
+            st.session_state.pending_user_text = "Create a 1-week plan based on my profile."
+            st.rerun()
+        if c2.button("Log workout", use_container_width=True, key="qa_log_workout"):
+            st.session_state.pending_user_text = "I just finished a workout. Log it for me." 
+            st.rerun()
+        if c3.button("Show progress", use_container_width=True, key="qa_progress"):
+            st.session_state.pending_user_text = "Show my progress summary so far."
+            st.rerun()
+        if c4.button("Use my PDFs", use_container_width=True, key="qa_use_pdfs"):
+            st.session_state.pending_user_text = "Use my uploaded PDFs to answer my next question."
+            st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     user_text = st.chat_input("Build me a workout plan…")
     if user_text:
@@ -1120,12 +1257,25 @@ def main() -> None:
                 answer = _filter_output(answer)
         except Exception as e:
             st.session_state.pending_user_text = None
-            _assistant_reply(f"Error: {e}")
+            friendly = _format_quota_error(str(e))
+            _assistant_reply(friendly or f"Error: {e}")
             st.rerun()
 
         st.session_state.pending_user_text = None
         _assistant_reply(answer)
         st.rerun()
+
+    retrievals = get_last_retrievals()
+    if retrievals.get("exercise") or retrievals.get("user"):
+        with st.expander("Retrieval details"):
+            if retrievals.get("exercise"):
+                st.markdown("**Exercise KB hits**")
+                for hit in retrievals["exercise"][:3]:
+                    st.write(hit)
+            if retrievals.get("user"):
+                st.markdown("**PDF hits**")
+                for hit in retrievals["user"][:3]:
+                    st.write(hit)
 
 
 @st.dialog("Structured Workout Log")
