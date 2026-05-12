@@ -1,5 +1,12 @@
 streamlit>=1.36
 python-dateutil>=2.9
+# Markdown rendering for chat message formatting
+markdown>=3.6
+# PDF extraction for RAG
+PyPDF2>=3.0.0
+pycryptodome>=3.20.0
+# Optional (recommended): vector search knowledge base
+chromadb>=0.5.0
 # Gemini SDK (new). If this fails in your env, see app.py fallback notes.
 google-genai>=0.6.0
 google-generativeai>=0.8.0

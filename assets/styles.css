@@ -1,0 +1,507 @@
+/* SmartFit custom styling (loaded via st.markdown(<style>...)). */
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+:root {
+  --sf-bg: #f6f1ea;
+  --sf-surface: #ffffff;
+  --sf-ink: #111827;
+  --sf-muted: #5f6b7a;
+  --sf-accent: #ff6b4a;
+  --sf-teal: #0f9ea8;
+  --sf-gold: #f3b44c;
+  --sf-border: rgba(17, 24, 39, 0.12);
+  --sf-shadow: 0 20px 60px rgba(17, 24, 39, 0.12);
+}
+
+html,
+body,
+[class*="css"],
+[data-testid="stAppViewContainer"] {
+  font-family:
+    "Space Grotesk",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  color: var(--sf-ink);
+}
+
+h1,
+h2,
+h3,
+.sf-hero-title {
+  font-family: "Fraunces", "Space Grotesk", serif;
+  letter-spacing: -0.02em;
+}
+
+div[data-testid="stAppViewContainer"] {
+  background:
+    radial-gradient(
+      1000px 500px at 8% -10%,
+      rgba(255, 107, 74, 0.2),
+      transparent 60%
+    ),
+    radial-gradient(
+      800px 400px at 90% 0%,
+      rgba(15, 158, 168, 0.2),
+      transparent 55%
+    ),
+    var(--sf-bg);
+}
+
+.main .block-container {
+  max-width: 1200px;
+  padding-top: 2.2rem;
+  padding-bottom: 3rem;
+}
+
+section[data-testid="stSidebar"] {
+  background: linear-gradient(
+    180deg,
+    rgba(15, 158, 168, 0.12),
+    rgba(255, 255, 255, 0.9)
+  );
+  border-right: 1px solid var(--sf-border);
+}
+
+.sf-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px;
+  padding: 2.2rem 2.4rem;
+  background: linear-gradient(120deg, #0f9ea8 0%, #2d7c8a 45%, #ff6b4a 100%);
+  color: #fff;
+  box-shadow: var(--sf-shadow);
+  animation: sf-fade-up 0.6s ease both;
+}
+
+.sf-hero::after {
+  content: "";
+  position: absolute;
+  right: -120px;
+  top: -90px;
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.35),
+    transparent 70%
+  );
+}
+
+.sf-hero-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
+
+.sf-hero-title {
+  font-size: clamp(2.2rem, 3vw, 3.4rem);
+  margin: 0.3rem 0 0.8rem 0;
+}
+
+.sf-hero-sub {
+  font-size: 1.02rem;
+  max-width: 700px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.sf-section {
+  margin-top: 1.8rem;
+}
+
+.sf-card {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: 18px;
+  padding: 1.2rem 1.3rem;
+  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.08);
+}
+
+.sf-side-card h3,
+.sf-side-card h2 {
+  margin-top: 0;
+}
+
+.sf-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.85),
+      rgba(255, 255, 255, 0.65)
+    ),
+    radial-gradient(
+      600px 200px at 10% 0%,
+      rgba(243, 180, 76, 0.15),
+      transparent 70%
+    );
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 20px;
+  padding: 1.2rem 1.3rem 1.4rem;
+  box-shadow: 0 16px 40px rgba(17, 24, 39, 0.08);
+}
+
+.sf-chat-bubble {
+  max-width: 78%;
+  width: fit-content;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  padding: 0.75rem 0.95rem;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  line-height: 1.4;
+}
+
+.sf-chat-bubble-user {
+  margin-left: auto;
+  border: 1px solid rgba(255, 107, 74, 0.28);
+  background: rgba(255, 107, 74, 0.1);
+  box-shadow: 0 8px 18px rgba(255, 107, 74, 0.18);
+}
+
+.sf-chat-bubble-assistant {
+  margin-right: auto;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.98),
+    rgba(255, 255, 255, 0.9)
+  );
+  border: 1px solid rgba(15, 158, 168, 0.22);
+  box-shadow: 0 10px 22px rgba(15, 158, 168, 0.12);
+}
+
+.sf-msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+
+.sf-msg-badge {
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.sf-badge-bot {
+  border-color: rgba(15, 158, 168, 0.35);
+  color: #0f6f77;
+  background: rgba(15, 158, 168, 0.12);
+}
+
+.sf-badge-user {
+  border-color: rgba(255, 107, 74, 0.35);
+  color: #a24b36;
+  background: rgba(255, 107, 74, 0.12);
+}
+
+.sf-msg-icon {
+  font-size: 0.85rem;
+}
+
+.sf-msg-text {
+  white-space: normal;
+}
+
+.sf-msg-text h1,
+.sf-msg-text h2,
+.sf-msg-text h3,
+.sf-msg-text h4 {
+  margin: 0.6rem 0 0.4rem;
+}
+
+.sf-msg-text p {
+  margin: 0 0 0.6rem;
+}
+
+.sf-msg-text p:last-child {
+  margin-bottom: 0;
+}
+
+.sf-msg-text ul,
+.sf-msg-text ol {
+  margin: 0.35rem 0 0.6rem 1.1rem;
+}
+
+.sf-msg-text code {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.88rem;
+  background: rgba(15, 23, 42, 0.06);
+  padding: 0.08rem 0.3rem;
+  border-radius: 6px;
+}
+
+.sf-msg-text pre {
+  background: rgba(15, 23, 42, 0.06);
+  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.sf-msg-text table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6rem 0;
+  font-size: 0.92rem;
+}
+
+.sf-msg-text th,
+.sf-msg-text td {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+.sf-msg-text th {
+  background: rgba(15, 158, 168, 0.12);
+  font-weight: 600;
+}
+
+.sf-chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.sf-chat-row.sf-chat-user {
+  justify-content: flex-end;
+  flex-direction: row-reverse;
+}
+
+.sf-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 1.05rem;
+  flex: 0 0 auto;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #fff;
+}
+
+.sf-avatar-bot {
+  background: linear-gradient(
+    135deg,
+    rgba(15, 158, 168, 0.18),
+    rgba(255, 107, 74, 0.15)
+  );
+}
+
+.sf-avatar-user {
+  background: rgba(255, 107, 74, 0.12);
+}
+
+div[data-testid="stChatInput"] {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 20px;
+  box-shadow:
+    0 16px 30px rgba(17, 24, 39, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  padding: 0.35rem 0.5rem;
+  position: sticky;
+  bottom: 1rem;
+  z-index: 5;
+}
+
+div[data-testid="stChatInput"]:focus-within {
+  border-color: rgba(15, 158, 168, 0.6);
+  box-shadow:
+    0 18px 34px rgba(15, 158, 168, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+div[data-testid="stMetric"] {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+div[data-testid="stMetric"] label {
+  color: var(--sf-muted);
+  font-weight: 600;
+}
+
+div[data-testid="stMetric"] div {
+  font-weight: 700;
+}
+
+div[data-testid="stChatInput"] textarea,
+div[data-testid="stTextInput"] input,
+div[data-testid="stTextArea"] textarea {
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 1rem;
+  line-height: 1.35;
+  padding: 0.55rem 0.65rem;
+}
+
+div[data-testid="stChatInput"] textarea {
+  min-height: 2.3rem;
+  height: 2.4rem;
+  resize: none;
+}
+
+div[data-testid="stChatInput"] textarea::placeholder {
+  color: rgba(17, 24, 39, 0.45);
+}
+
+div[data-testid="stChatInput"] button {
+  border-radius: 12px;
+  border: 1px solid rgba(15, 158, 168, 0.5);
+  background: linear-gradient(
+    135deg,
+    rgba(15, 158, 168, 0.2),
+    rgba(255, 107, 74, 0.16)
+  );
+  color: var(--sf-ink);
+  min-height: 2.3rem;
+  padding: 0.2rem 0.8rem;
+}
+
+div[data-testid="stChatInput"] button:hover {
+  border-color: rgba(15, 158, 168, 0.8);
+  box-shadow: 0 6px 16px rgba(15, 158, 168, 0.2);
+}
+
+.sf-typing {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.sf-typing-bubble {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 158, 168, 0.22);
+  border-radius: 16px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.95rem;
+  box-shadow: 0 8px 18px rgba(15, 158, 168, 0.12);
+}
+
+.sf-quick-actions {
+  margin-top: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
+.sf-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: rgba(15, 158, 168, 0.7);
+  animation: sf-pulse 1.2s infinite ease-in-out;
+}
+
+.sf-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.sf-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes sf-pulse {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+div[data-testid="stButton"] > button {
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  padding: 0.6rem 0.9rem;
+  background: #fff;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+div[data-testid="stButton"] > button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 23, 42, 0.32);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.sf-quick-actions div[data-testid="stButton"] > button {
+  border-radius: 999px;
+  border: 1px solid rgba(15, 158, 168, 0.35);
+  background: rgba(15, 158, 168, 0.06);
+  font-weight: 600;
+  font-size: 0.92rem;
+  padding: 0.35rem 0.85rem;
+  min-height: 2.1rem;
+}
+
+.sf-quick-actions div[data-testid="stButton"] > button:hover {
+  border-color: rgba(15, 158, 168, 0.6);
+  background: rgba(15, 158, 168, 0.16);
+  box-shadow: 0 10px 20px rgba(15, 158, 168, 0.18);
+}
+
+@keyframes sf-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Spacing helper used between chat messages */
+.sf-spacer {
+  height: 0.4rem;
+}
+
+/* Chat bubble styling for the custom user message HTML */
+.sf-chat-bubble {
+  box-sizing: border-box;
+}
+
+/* Sidebar action buttons: left-aligned, borderless by default, visible on hover. */
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+  justify-content: flex-start !important;
+  text-align: left !important;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button > div,
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button span {
+  justify-content: flex-start !important;
+  text-align: left !important;
+  width: 100% !important;
+}
+
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+  border-color: rgba(15, 23, 42, 0.16);
+  background: rgba(15, 23, 42, 0.04);
+}

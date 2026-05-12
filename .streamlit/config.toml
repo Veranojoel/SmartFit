@@ -1,0 +1,8 @@
+[theme]
+# SmartFit theme (Streamlit)
+base = "light"
+primaryColor = "#3b82f6"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f7fb"
+textColor = "#0f172a"
+font = "sans serif"
